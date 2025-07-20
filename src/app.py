@@ -10,7 +10,7 @@ try:
     AZURE_SPEECH_KEY = st.secrets["AZURE_SPEECH_KEY"]
     AZURE_SPEECH_REGION = st.secrets.get("AZURE_REGION", "brazilsouth") 
 except KeyError:
-    st.error("❌ **Chave de API Azure não encontrada!** Verifique as configurações de 'Secrets' no seu aplicativo Streamlit. Ex: AZURE_SPEECH_KEY e AZURE_REGION")
+    st.error("**Chave de API Azure não encontrada!** Verifique as configurações de 'Secrets' no seu aplicativo Streamlit. Ex: AZURE_SPEECH_KEY e AZURE_REGION")
     st.stop()
 
 
