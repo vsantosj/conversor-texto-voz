@@ -1,0 +1,39 @@
+# Arquivos e diretórios específicos do Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.env                 # Variáveis de ambiente locais (sensíveis, não devem ser versionadas)
+
+# Arquivos e diretórios específicos do Streamlit
+.streamlit/secrets.toml # Nunca faça commit de segredos! Eles são configurados no Streamlit Cloud.
+.streamlit/*.sqlite     # Bancos de dados temporários ou de cache do Streamlit
+
+# Arquivos e diretórios de IDEs
+.vscode/                 # Configurações do VS Code
+.idea/                   # Configurações do PyCharm/IntelliJ
+*.iml                    # Arquivos de módulo do IntelliJ
+
+# Logs
+*.log
+logs/
+
+# Arquivos de cache e temporários
+.ipynb_checkpoints       # Notebooks Jupyter
+.pytest_cache/           # Cache de testes Pytest
+*.egg-info/
+build/
+dist/
+
+# Dados gerados pelo aplicativo
+# Se seu app cria arquivos de áudio, certifique-se de ignorá-los para não poluir o repositório
+audio.mp3                # Se este é um arquivo de saída temporário
+voz_*.mp3                # Padrão para arquivos gerados como 'voz_1753049972.mp3'
+generated_audio/         # Uma pasta para áudios gerados, se você decidir criar uma
+
+# Arquivos de sistema ocultos (macOS/Windows)
+.DS_Store
+Thumbs.db
