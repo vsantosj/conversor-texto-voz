@@ -37,3 +37,7 @@ generated_audio/         # Uma pasta para áudios gerados, se você decidir cria
 # Arquivos de sistema ocultos (macOS/Windows)
 .DS_Store
 Thumbs.db
+
+.env
+
+.streamlit/secrets.toml
