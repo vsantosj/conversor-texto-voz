@@ -1,19 +1,26 @@
 import os
 import time
+import re
 import streamlit as st
 import requests
 from dotenv import load_dotenv
 from io import BytesIO
 from pydub import AudioSegment
+from pydub.utils import which
 
+# Verifica se o FFmpeg está disponível
+if not which("ffmpeg"):
+    st.error("FFmpeg não está instalado ou não está no PATH do sistema. O processamento de áudio pode falhar.")
+
+# Carrega as chaves do Azure via Streamlit Secrets
 try:
     AZURE_SPEECH_KEY = st.secrets["AZURE_SPEECH_KEY"]
-    AZURE_SPEECH_REGION = st.secrets.get("AZURE_REGION", "brazilsouth") 
+    AZURE_SPEECH_REGION = st.secrets.get("AZURE_REGION", "brazilsouth")
 except KeyError:
-    st.error("**Chave de API Azure não encontrada!** Verifique as configurações de 'Secrets' no seu aplicativo Streamlit. Ex: AZURE_SPEECH_KEY e AZURE_REGION")
+    st.error("Chave de API Azure não encontrada! Verifique as configurações de 'Secrets'. Ex: AZURE_SPEECH_KEY e AZURE_REGION")
     st.stop()
 
-
+# Configuração da API
 ENDPOINT = f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
 HEADERS = {
     "Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY,
@@ -21,6 +28,7 @@ HEADERS = {
     "X-Microsoft-OutputFormat": "audio-16khz-128kbitrate-mono-mp3"
 }
 
+# Vozes disponíveis
 VOICES = {
     "Camila - Feminina (pt-BR)": "pt-BR-FranciscaNeural",
     "Daniel - Masculina (pt-BR)": "pt-BR-AntonioNeural",
@@ -28,6 +36,7 @@ VOICES = {
     "Narrador - Neutro": "pt-BR-CelioNeural"
 }
 
+# Geração do SSML
 def generate_ssml(text, voice_name, rate="0%"):
     return f"""
     <speak version='1.0' xml:lang='pt-BR'>
@@ -37,6 +46,7 @@ def generate_ssml(text, voice_name, rate="0%"):
     </speak>
     """
 
+# Requisição para TTS
 def text_to_speech(text, voice_name, rate="0%", retries=2):
     ssml = generate_ssml(text, voice_name, rate)
     for attempt in range(retries + 1):
@@ -45,7 +55,7 @@ def text_to_speech(text, voice_name, rate="0%", retries=2):
                 ENDPOINT,
                 headers=HEADERS,
                 data=ssml.encode("utf-8"),
-                timeout=15 
+                timeout=15
             )
             if response.status_code == 200:
                 return response.content
@@ -53,126 +63,119 @@ def text_to_speech(text, voice_name, rate="0%", retries=2):
                 try:
                     error_message = response.json().get("error", {}).get("message", response.text)
                 except requests.exceptions.JSONDecodeError:
-                    error_message = response.text 
-                st.error(f"Erro na conversão do bloco (HTTP {response.status_code}):** {error_message}")
+                    error_message = response.text
+                st.error(f"Erro na conversão do bloco (HTTP {response.status_code}): {error_message}")
                 return None
         except requests.RequestException as e:
             if attempt < retries:
-                st.warning(f"⚠️ Tentativa {attempt + 1}/{retries + 1}: Erro de conexão. Tentando novamente em 2 segundos...")
+                st.warning(f"Tentativa {attempt + 1}/{retries + 1}: Erro de conexão. Tentando novamente...")
                 time.sleep(2)
-                continue
             else:
-                st.error("**Erro fatal!** Não foi possível conectar ao serviço Azure TTS após várias tentativas.")
+                st.error("Não foi possível conectar ao serviço Azure TTS.")
                 st.exception(e)
                 return None
 
+# Quebra de texto
 def split_text(text, max_length=4000):
-    parts = []
-    text = text.strip()
+    paragraphs = re.split(r'(?<=[.!?])\s+', text.strip())
+    blocks = []
+    current = ""
 
-    while len(text) > max_length:
-        split_pos = text.rfind('.', 0, max_length)
-        if split_pos == -1:
-            split_pos = text.rfind(' ', 0, max_length)
-            if split_pos == -1:
-                split_pos = max_length
+    for p in paragraphs:
+        if len(current) + len(p) + 1 <= max_length:
+            current += p + " "
         else:
-            split_pos += 1
+            blocks.append(current.strip())
+            current = p + " "
+    if current:
+        blocks.append(current.strip())
 
-        parts.append(text[:split_pos].strip())
-        text = text[split_pos:].strip()
+    return blocks
 
-    if text:
-        parts.append(text)
+# Interface Streamlit
+st.set_page_config(page_title="Conversor de Texto em Áudio", page_icon=None, layout="centered")
 
-    return parts
-
-
-st.set_page_config(
-    page_title="Conversor de Texto em Áudio",
-    page_icon="🗣️", # Ícone da aba do navegador
-    layout="centered"
-)
-
-st.title("🗣️ Conversor de Texto em Áudio")
-st.markdown("Transforme qualquer texto em fala natural usando o poder da inteligência artificial da Azure. Ideal para criar narrações, audiobooks ou conteúdo acessível. ✨")
+st.title("Conversor de Texto em Áudio")
 st.markdown("---")
 
-text = st.text_area("Digite o texto para converter em áudio:", height=200, placeholder="Ex: Olá! Bem-vindo ao meu aplicativo de conversão de texto em áudio. Digite aqui o que você gostaria de ouvir.")
-voice = st.selectbox("🎙️ Escolha a voz:", list(VOICES.keys()))
-rate = st.slider("⚡️ Velocidade da fala (%)", -50, 50, 0, step=10, help="Ajusta a velocidade da fala. Valores negativos deixam a fala mais lenta, positivos mais rápida.")
+text = st.text_area("Texto para converter em áudio:", height=200, placeholder="Digite o texto desejado.")
+voice = st.selectbox("Escolha a voz:", list(VOICES.keys()))
+rate = st.slider("Velocidade da fala (%)", -50, 50, 0, step=10)
 
-if text.strip():
+# Informações sobre o texto
+char_count = len(text.strip())
+if char_count:
     text_parts = split_text(text)
-    st.info(f"🧾 Seu texto tem **{len(text)} caracteres** e será processado em **{len(text_parts)} bloco(s)**.")
+    st.info(f"Total de caracteres digitados: {char_count}")
+    st.success(f"O texto será processado em {len(text_parts)} bloco(s).")
 else:
-    st.info("⌨️ Por favor, digite um texto acima para converter em áudio.")
+    st.info("Digite um texto acima para ver os detalhes.")
 
-st.markdown("---") # Separador para organizar a interface
+st.markdown("---")
 
-if st.button("▶️ Converter Texto em Áudio"):
-
+if st.button("Converter Texto em Áudio"):
     if not text.strip():
-        st.warning("⚠️ **Atenção!** Você precisa digitar um texto para converter.")
+        st.warning("Digite um texto antes de converter.")
         st.stop()
 
     voice_selected = VOICES.get(voice, "pt-BR-FranciscaNeural")
     audio_segments = []
     success_count = 0
 
-    st.subheader("Processamento de Áudio 🎧")
+    st.subheader("Processando Áudio")
     progress_bar = st.progress(0)
     status_text = st.empty()
 
     for idx, part in enumerate(text_parts, start=1):
-        status_text.text(f"⏳ Processando bloco {idx} de {len(text_parts)}...")
+        status_text.text(f"Processando bloco {idx} de {len(text_parts)}...")
         audio_bytes = text_to_speech(part, voice_selected, rate=f"{rate}%")
-        
-        progress_bar.progress((idx) / len(text_parts)) # Atualiza a barra de progresso
-        
+        progress_bar.progress(idx / len(text_parts))
+
+        with st.expander(f"Bloco {idx}"):
+            st.write(part)
+
         if audio_bytes:
             try:
                 segment = AudioSegment.from_file(BytesIO(audio_bytes), format="mp3")
                 audio_segments.append(segment)
-                st.success(f"✅ Bloco {idx} gerado com sucesso.")
+                st.success(f"Bloco {idx} gerado com sucesso.")
                 success_count += 1
             except Exception as e:
-                st.error(f"Erro ao processar o áudio do bloco {idx} com pydub. Verifique se FFmpeg está instalado. Detalhes: {e}")
-                # Não para o app, mas continua para outros blocos
+                st.error(f"Erro ao processar o áudio do bloco {idx}. Verifique se o FFmpeg está instalado.")
+                st.exception(e)
         else:
-            st.error(f"Falha crítica ao gerar o bloco {idx}. Verifique logs acima para mais detalhes.")
-            # Se um bloco falha, não podemos concatenar tudo no final, mas continuamos para ver outros erros
-            
-    status_text.text("Processamento de blocos concluído!")
+            st.error(f"Falha ao gerar o bloco {idx}. Verifique os erros acima.")
+
+    status_text.text("Processamento de blocos concluído.")
     st.markdown("---")
 
-    st.subheader("Resultados ✨")
-    st.info(f"**Resumo:** Total de caracteres: **{len(text)}** | Blocos processados com sucesso: **{success_count} de {len(text_parts)}**")
+    st.subheader("Resultados")
+    st.info(f"""
+Resumo Final:
+- Total de caracteres digitados: {char_count}
+- Blocos processados com sucesso: {success_count} de {len(text_parts)}
+""")
 
-    if success_count == len(text_parts) and audio_segments: # Garante que todos foram gerados e há segmentos
-        st.info("🔄 **Concatenando todos os áudios gerados...** Isso pode levar alguns segundos. 🔊")
-        
+    if success_count == len(text_parts) and audio_segments:
+        st.info("Concatenando os áudios gerados...")
+
         try:
             combined = sum(audio_segments)
             mp3_buffer = BytesIO()
             combined.export(mp3_buffer, format="mp3")
             mp3_data = mp3_buffer.getvalue()
 
-            st.success("🎉 **Áudio completo gerado com sucesso!**")
-            st.audio(mp3_data, format="audio/mp3", help="Ouça seu áudio aqui.")
-            st.download_button(
-                label="⬇️ Baixar Áudio Completo (MP3)",
-                data=mp3_data,
-                file_name="audio_completo.mp3",
-                mime="audio/mp3"
-            )
+            st.success("Áudio completo gerado com sucesso.")
+            st.audio(mp3_data, format="audio/mp3")
+            st.download_button("Baixar Áudio Completo (MP3)", data=mp3_data, file_name="audio_completo.mp3", mime="audio/mp3")
+
         except Exception as e:
-            st.error(f"**Erro ao concatenar ou exportar o áudio final.** Detalhes: {e}")
-            st.warning("Pode haver um problema com os segmentos de áudio gerados ou com a instalação do FFmpeg.")
+            st.error("Erro ao exportar o áudio final.")
+            st.exception(e)
     elif not audio_segments:
-        st.warning(" **Nenhum bloco de áudio foi gerado com sucesso.** Não há áudio para concatenar.")
+        st.warning("Nenhum bloco foi gerado com sucesso. Nada para concatenar.")
     else:
-        st.warning("**Nem todos os blocos foram gerados com sucesso.** A concatenação do áudio completo não é possível. Verifique os erros acima.")
+        st.warning("Nem todos os blocos foram gerados. A concatenação completa não é possível.")
 
 st.markdown("---")
 st.markdown("Feito por [Viviane](https://github.com/vsantosj)")
